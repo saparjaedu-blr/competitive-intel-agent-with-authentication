@@ -39,73 +39,28 @@ def render_login_page():
         width: 100%;
         box-shadow: 0 4px 24px rgba(0,0,0,0.06);
     }
-    .login-logo {
-        background: #1a56db;
-        color: white;
-        border-radius: 14px;
-        width: 56px;
-        height: 56px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 28px;
-        font-weight: 700;
-        margin: 0 auto 20px auto;
-        box-shadow: 0 4px 14px rgba(26,86,219,0.3);
-    }
-    .login-title {
-        font-size: 24px;
-        font-weight: 700;
-        color: #0f172a;
-        letter-spacing: -0.03em;
-        margin-bottom: 8px;
-    }
-    .login-sub {
-        font-size: 14px;
-        color: #64748b;
-        margin-bottom: 32px;
-        line-height: 1.6;
-    }
-    .login-footer {
-        font-size: 11px;
-        color: #94a3b8;
-        margin-top: 24px;
-    }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown("""
-    <div class='login-wrap'>
-        <div class='login-card'>
-            <div class='login-logo'>⚡</div>
-            <div class='login-title'>CompIntel</div>
-            <div class='login-sub'>
+    <div style='display:flex;flex-direction:column;align-items:center;
+        justify-content:center;min-height:70vh'>
+        <div style='background:#ffffff;border:1px solid #e8e4dd;border-radius:16px;
+            padding:48px 56px;max-width:440px;width:100%;
+            box-shadow:0 4px 24px rgba(0,0,0,0.06);text-align:center'>
+            <div style='background:#1a56db;color:white;border-radius:14px;
+                width:56px;height:56px;display:flex;align-items:center;
+                justify-content:center;font-size:28px;font-weight:700;
+                margin:0 auto 20px auto;box-shadow:0 4px 14px rgba(26,86,219,0.3)'>⚡</div>
+            <div style='font-size:24px;font-weight:700;color:#0f172a;
+                letter-spacing:-0.03em;margin-bottom:8px'>CompIntel</div>
+            <div style='font-size:14px;color:#64748b;margin-bottom:32px;line-height:1.6'>
                 AI-Powered Competitive Intelligence Agent<br>
                 Sign in to access your dashboard
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-    # Centre the Google sign-in button
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        try:
-            from streamlit_google_auth import Authenticate
-            auth = Authenticate(
-                secret_credentials_path=None,
-                cookie_name="compintel_session",
-                cookie_key=st.secrets.get("cookie_key", "compintel_secret_key_2026"),
-                redirect_uri=st.secrets.get("google_oauth", {}).get(
-                    "redirect_uri", "http://localhost:8501"),
-            )
-            auth.check_authentification()
-            auth.login()
-        except ImportError:
-            st.error("streamlit-google-auth not installed. Run: pip install streamlit-google-auth")
-        except Exception as e:
-            st.error(f"Auth configuration error: {e}")
-            st.info("Check your .streamlit/secrets.toml configuration.")
 
     st.markdown("""
     <div style='text-align:center;margin-top:16px'>
@@ -158,26 +113,36 @@ def require_auth():
     """
     try:
         from streamlit_google_auth import Authenticate
+
+        client_id     = st.secrets["google_oauth"]["client_id"]
+        client_secret = st.secrets["google_oauth"]["client_secret"]
+        redirect_uri  = st.secrets["google_oauth"]["redirect_uri"]
+        cookie_key    = st.secrets.get("cookie_key", "compintel_secret_key_2026")
+
         auth = Authenticate(
             secret_credentials_path=None,
             cookie_name="compintel_session",
-            cookie_key=st.secrets.get("cookie_key", "compintel_secret_key_2026"),
-            redirect_uri=st.secrets.get("google_oauth", {}).get(
-                "redirect_uri", "http://localhost:8501"),
+            cookie_key=cookie_key,
+            redirect_uri=redirect_uri,
         )
         auth.check_authentification()
 
         if not st.session_state.get("connected"):
+            # Show login page UI + the single Google sign-in button
             render_login_page()
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                auth.login()
             return False
 
         # Authenticated — init session if not already done
         if "user" not in st.session_state:
+            user_info = st.session_state.get("user_info", {})
             google_user = {
-                "email":       st.session_state.get("user_info", {}).get("email", ""),
-                "given_name":  st.session_state.get("user_info", {}).get("given_name", ""),
-                "family_name": st.session_state.get("user_info", {}).get("family_name", ""),
-                "picture":     st.session_state.get("user_info", {}).get("picture", ""),
+                "email":       user_info.get("email", ""),
+                "given_name":  user_info.get("given_name", ""),
+                "family_name": user_info.get("family_name", ""),
+                "picture":     user_info.get("picture", ""),
             }
             init_session(google_user)
 
@@ -185,7 +150,7 @@ def require_auth():
 
     except ImportError:
         # Dev mode — bypass auth if library not installed
-        st.warning("⚠️ Running in dev mode without authentication (streamlit-google-auth not installed)")
+        st.warning("⚠️ Running in dev mode without authentication.")
         if "user" not in st.session_state:
             st.session_state["user"] = {
                 "id": 1, "email": "saparja.edu@gmail.com",
@@ -195,6 +160,12 @@ def require_auth():
             st.session_state["user_roles"] = [ROLE_SUPER_ADMIN, ROLE_END_USER]
             st.session_state["is_admin"] = True
         return True
+
+    except Exception as e:
+        render_login_page()
+        st.error(f"Auth configuration error: {e}")
+        st.info("Check your .streamlit/secrets.toml configuration.")
+        return False
 
 
 def render_user_pill():
@@ -232,22 +203,7 @@ def render_user_pill():
 
 def render_logout():
     """Logout button in sidebar."""
-    try:
-        from streamlit_google_auth import Authenticate
-        auth = Authenticate(
-            secret_credentials_path=None,
-            cookie_name="compintel_session",
-            cookie_key=st.secrets.get("cookie_key", "compintel_secret_key_2026"),
-            redirect_uri=st.secrets.get("google_oauth", {}).get(
-                "redirect_uri", "http://localhost:8501"),
-        )
-        if st.button("Sign Out", use_container_width=True, type="secondary"):
-            auth.logout()
-            for key in ["user", "user_roles", "is_admin", "connected", "user_info"]:
-                st.session_state.pop(key, None)
-            st.rerun()
-    except ImportError:
-        if st.button("Sign Out (dev)", use_container_width=True, type="secondary"):
-            for key in ["user", "user_roles", "is_admin"]:
-                st.session_state.pop(key, None)
-            st.rerun()
+    if st.button("Sign Out", use_container_width=True, type="secondary"):
+        for key in ["user", "user_roles", "is_admin", "connected", "user_info"]:
+            st.session_state.pop(key, None)
+        st.rerun()
