@@ -33,7 +33,8 @@ class AgentState(TypedDict):
     # ── Inputs ────────────────────────────────
     vendors: List[str]
     research_query: str
-    save_to_drive: bool           # whether to upload report to Google Drive
+    save_to_drive: bool
+    user_id: int                  # scopes competitor + report lookups to this user
 
     # ── Intermediate ──────────────────────────
     raw_data: List[CompetitorRawData]

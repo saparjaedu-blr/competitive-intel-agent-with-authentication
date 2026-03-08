@@ -1,6 +1,7 @@
 import time
 import streamlit as st
-from db.database import get_all_competitors
+from db.auth_db import get_competitors_for_user, save_report_for_user, log_usage
+from auth.google_auth import get_current_user_id
 from mailer.emailer import send_report_email
 
 
@@ -89,7 +90,12 @@ def render():
         unsafe_allow_html=True
     )
 
-    competitors = get_all_competitors()
+    user_id = get_current_user_id()
+    if not user_id:
+        st.error("Not authenticated.")
+        return
+
+    competitors = get_competitors_for_user(user_id)
     if not competitors:
         st.warning("No competitors configured yet. Go to **Configure Competitors** to add some.")
         return
@@ -148,14 +154,14 @@ def render():
         if not research_query.strip():
             st.warning("Please enter a research focus before running.")
             return
-        _run_with_progress(selected_vendors, research_query, save_to_drive)
+        _run_with_progress(selected_vendors, research_query, save_to_drive, user_id)
 
     # ── Display Results ────────────────────────────────────────────────────────
     if "agent_result" in st.session_state:
         _render_results(st.session_state["agent_result"])
 
 
-def _run_with_progress(selected_vendors, research_query, save_to_drive):
+def _run_with_progress(selected_vendors, research_query, save_to_drive, user_id):
     from agent.graph import stream_agent, PIPELINE_STEPS, STEP_LABELS
 
     total_steps = len(PIPELINE_STEPS)
@@ -238,6 +244,25 @@ def _run_with_progress(selected_vendors, research_query, save_to_drive):
 
         # ── Done ──────────────────────────────────────────────────────────────
         analysis_duration = round(time.time() - analysis_start, 1)
+
+        # Log usage for analytics
+        log_usage(
+            user_id=user_id,
+            action="evaluation",
+            vendors=selected_vendors,
+            research_query=research_query,
+            duration_secs=analysis_duration,
+        )
+
+        # Save report scoped to this user
+        if result and save_to_drive:
+            save_report_for_user(
+                user_id=user_id,
+                research_query=research_query,
+                vendors_covered=selected_vendors,
+                report_markdown=result.get("final_report_markdown", ""),
+                gdrive_link=result.get("gdrive_link", ""),
+            )
 
         progress_bar.progress(1.0)
         pct_text.markdown(

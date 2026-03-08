@@ -49,44 +49,42 @@ def build_graph() -> StateGraph:
     return graph.compile()
 
 
-def run_agent(vendors: list[str], research_query: str, save_to_drive: bool = False) -> AgentState:
+def run_agent(vendors: list[str], research_query: str,
+              save_to_drive: bool = False, user_id: int = None) -> AgentState:
     """Invoke the full pipeline (blocking). Returns final state."""
     app = build_graph()
-    initial_state = _make_initial_state(vendors, research_query, save_to_drive)
+    initial_state = _make_initial_state(vendors, research_query, save_to_drive, user_id)
     return app.invoke(initial_state)
 
 
-def stream_agent(vendors: list[str], research_query: str, save_to_drive: bool = False):
-    """
-    Stream the pipeline node-by-node.
-    Yields (node_name, partial_state) after each node completes.
-    Final yield will have node_name == '__end__' and full final state.
-    """
+def stream_agent(vendors: list[str], research_query: str,
+                 save_to_drive: bool = False, user_id: int = None):
+    """Stream the pipeline node-by-node."""
     app = build_graph()
-    initial_state = _make_initial_state(vendors, research_query, save_to_drive)
+    initial_state = _make_initial_state(vendors, research_query, save_to_drive, user_id)
 
     final_state = initial_state
     for event in app.stream(initial_state, stream_mode="updates"):
         for node_name, node_output in event.items():
-            # Merge partial output into running state
             final_state = {**final_state, **node_output}
             yield node_name, final_state
 
     yield "__end__", final_state
 
 
-def _make_initial_state(vendors, research_query, save_to_drive) -> AgentState:
+def _make_initial_state(vendors, research_query, save_to_drive, user_id=None) -> AgentState:
     return {
-        "vendors": vendors,
+        "vendors":        vendors,
         "research_query": research_query,
-        "save_to_drive": save_to_drive,
-        "raw_data": [],
-        "syntheses": [],
-        "diffs": [],
+        "save_to_drive":  save_to_drive,
+        "user_id":        user_id,
+        "raw_data":       [],
+        "syntheses":      [],
+        "diffs":          [],
         "final_report_markdown": "",
-        "gdrive_link": "",
+        "gdrive_link":           "",
         "analysis_duration_seconds": 0.0,
-        "drive_duration_seconds": 0.0,
-        "errors": [],
+        "drive_duration_seconds":    0.0,
+        "errors":       [],
         "current_step": "starting",
     }
