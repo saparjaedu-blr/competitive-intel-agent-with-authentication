@@ -16,9 +16,10 @@ st.set_page_config(
 init_db()
 init_auth_db()
 
-# ── Auth gate — stop here if not signed in ─────────────────────────────────────
-if not require_auth():
-    st.stop()
+# ── Auth gate ─────────────────────────────────────────────────────────────────
+# require_auth() handles st.stop() internally.
+# DO NOT wrap this in `if not ...: st.stop()` — that was the bug.
+require_auth()
 
 # ── Global CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
