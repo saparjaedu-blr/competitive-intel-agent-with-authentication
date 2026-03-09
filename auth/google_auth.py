@@ -1,9 +1,15 @@
 """
-auth/google_auth.py — Google OAuth via streamlit-google-auth
+auth/google_auth.py — Google OAuth using Streamlit's native built-in auth (st.login)
+
+secrets.toml format:
+    [auth]
+    redirect_uri = "https://your-app.streamlit.app/oauth2callback"
+    cookie_secret = "your_random_secret"
+    client_id = "xxx.apps.googleusercontent.com"
+    client_secret = "xxx"
+    server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
 """
 
-import json
-import tempfile
 import streamlit as st
 from db.auth_db import (
     upsert_user, get_user_roles,
@@ -11,50 +17,7 @@ from db.auth_db import (
 )
 
 
-def _make_credentials_file() -> str:
-    """
-    streamlit-google-auth needs a credentials JSON file path.
-    We build it on-the-fly from secrets.toml so no file needs to be committed.
-    """
-    client_id     = st.secrets["google_oauth"]["client_id"]
-    client_secret = st.secrets["google_oauth"]["client_secret"]
-    redirect_uri  = st.secrets["google_oauth"]["redirect_uri"]
-
-    creds = {
-        "web": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uris": [redirect_uri],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    }
-
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-    json.dump(creds, tmp)
-    tmp.flush()
-    return tmp.name
-
-
-def _get_auth():
-    """Return a single Authenticate instance cached in session_state."""
-    if "auth_instance" not in st.session_state:
-        from streamlit_google_auth import Authenticate
-        creds_path   = _make_credentials_file()
-        redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
-        cookie_key   = st.secrets.get("cookie_key", "compintel_secret_key_2026")
-
-        st.session_state["auth_instance"] = Authenticate(
-            secret_credentials_path=creds_path,
-            cookie_name="compintel_session",
-            cookie_key=cookie_key,
-            redirect_uri=redirect_uri,
-        )
-    return st.session_state["auth_instance"]
-
-
 def _render_login_card():
-    """Renders the branding card above the Google button."""
     st.markdown("""
         <div style='display:flex;justify-content:center;margin-top:80px;margin-bottom:32px'>
             <div style='background:#ffffff;border:1px solid #e8e4dd;border-radius:16px;
@@ -75,11 +38,15 @@ def _render_login_card():
     """, unsafe_allow_html=True)
 
 
-def init_session(google_user: dict) -> dict:
-    email      = google_user.get("email", "")
-    first_name = google_user.get("given_name", "")
-    last_name  = google_user.get("family_name", "")
-    picture    = google_user.get("picture", "")
+def init_session() -> dict:
+    """Populate session state from st.user after successful login."""
+    user_info = st.user
+    email      = user_info.get("email", "")
+    first_name = user_info.get("given_name", "") or user_info.get("name", "").split()[0]
+    last_name  = user_info.get("family_name", "") or (
+        " ".join(user_info.get("name", "").split()[1:]) if user_info.get("name") else ""
+    )
+    picture = user_info.get("picture", "")
 
     user  = upsert_user(email, first_name, last_name, picture)
     roles = get_user_roles(user["id"])
@@ -105,53 +72,27 @@ def current_user_is_admin() -> bool:
 
 def require_auth() -> bool:
     """
-    Auth gate — call once at the top of app.py.
+    Auth gate using Streamlit native st.login().
     Returns True when signed in, False when showing login UI.
     """
-    try:
-        auth = _get_auth()
-        auth.check_authentification()
-
-        if not st.session_state.get("connected"):
-            _render_login_card()
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                auth.login()
-            st.markdown(
-                "<p style='text-align:center;font-size:11px;color:#94a3b8;margin-top:16px'>"
-                "Your data is private and not shared with other users.</p>",
-                unsafe_allow_html=True
-            )
-            return False
-
-        # Signed in — populate session once
-        if "user" not in st.session_state:
-            user_info = st.session_state.get("user_info", {})
-            init_session({
-                "email":       user_info.get("email", ""),
-                "given_name":  user_info.get("given_name", ""),
-                "family_name": user_info.get("family_name", ""),
-                "picture":     user_info.get("picture", ""),
-            })
-
-        return True
-
-    except ImportError:
-        st.warning("⚠️  Dev mode — auth bypassed.")
-        if "user" not in st.session_state:
-            st.session_state["user"]       = {
-                "id": 1, "email": "saparja.edu@gmail.com",
-                "first_name": "Saparja", "last_name": "Edu", "picture_url": ""
-            }
-            st.session_state["user_roles"] = [ROLE_SUPER_ADMIN, ROLE_END_USER]
-            st.session_state["is_admin"]   = True
-        return True
-
-    except Exception as e:
+    if not st.user.is_logged_in:
         _render_login_card()
-        st.error(f"Auth error: {e}")
-        st.info("Check your Streamlit secrets (google_oauth section).")
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("Sign in with Google", type="primary", use_container_width=True):
+                st.login()
+        st.markdown(
+            "<p style='text-align:center;font-size:11px;color:#94a3b8;margin-top:16px'>"
+            "Your data is private and not shared with other users.</p>",
+            unsafe_allow_html=True
+        )
         return False
+
+    # Signed in — populate session once per session
+    if "user" not in st.session_state:
+        init_session()
+
+    return True
 
 
 def render_user_pill():
@@ -188,6 +129,6 @@ def render_user_pill():
 
 def render_logout():
     if st.button("Sign Out", use_container_width=True, type="secondary"):
-        for k in ["user", "user_roles", "is_admin", "connected", "user_info", "auth_instance"]:
+        for k in ["user", "user_roles", "is_admin"]:
             st.session_state.pop(k, None)
-        st.rerun()
+        st.logout()
