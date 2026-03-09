@@ -585,25 +585,35 @@ def current_user_is_admin() -> bool:
 def require_auth() -> bool:
     """
     Auth gate — call once at the top of app.py.
-    Returns True when signed in, False when showing landing page + login UI.
+    Shows landing page first. Only redirects to Google when button is clicked.
+    Returns True when signed in, False when showing landing page.
     """
     if not _is_logged_in():
-        # Render full landing page
-        _render_homepage()
-        # Sign in button centred below CTA
-        col1, col2, col3 = st.columns([2, 1, 2])
-        with col2:
+
+        # If user clicked "Sign in", trigger redirect now
+        if st.session_state.get("trigger_login"):
             try:
                 st.login("google")
             except TypeError:
                 st.login()
+            return False
+
+        # Otherwise show landing page
+        _render_homepage()
+
+        # Sign in button in CTA section
+        col1, col2, col3 = st.columns([2, 1, 2])
+        with col2:
+            if st.button("🔑  Sign in with Google", type="primary", use_container_width=True):
+                st.session_state["trigger_login"] = True
+                st.rerun()
+
         st.markdown(
             "<p style='text-align:center;font-size:11px;color:#475569;"
             "background:#0f172a;padding:0 0 40px;margin:0'>"
             "Your data is private and never shared with other users.</p>",
             unsafe_allow_html=True,
         )
-        # Footer
         st.markdown("""
             <div class="footer">
                 Built with LangGraph · GPT-4o Vision · Streamlit &nbsp;|&nbsp;
@@ -612,7 +622,8 @@ def require_auth() -> bool:
         """, unsafe_allow_html=True)
         return False
 
-    # Signed in — populate session once per session
+    # Signed in — clear trigger flag and populate session
+    st.session_state.pop("trigger_login", None)
     if "user" not in st.session_state:
         init_session()
     return True
