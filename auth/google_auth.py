@@ -1,12 +1,12 @@
 """
-auth/google_auth.py — Google OAuth using Streamlit's native built-in auth (st.login)
+auth/google_auth.py — Google OAuth using Streamlit's native built-in auth
 
 secrets.toml format:
     [auth]
-    redirect_uri = "https://your-app.streamlit.app/oauth2callback"
-    cookie_secret = "your_random_secret"
-    client_id = "xxx.apps.googleusercontent.com"
-    client_secret = "xxx"
+    redirect_uri        = "https://your-app.streamlit.app/oauth2callback"
+    cookie_secret       = "your_random_secret"
+    client_id           = "xxx.apps.googleusercontent.com"
+    client_secret       = "xxx"
     server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
 """
 
@@ -15,6 +15,53 @@ from db.auth_db import (
     upsert_user, get_user_roles,
     ROLE_SUPER_ADMIN, ROLE_END_USER
 )
+
+
+def _is_logged_in() -> bool:
+    """
+    Safely check login state across different Streamlit versions.
+    Streamlit >= 1.42 uses st.user.is_logged_in
+    Older versions use st.experimental_user or session_state fallback.
+    """
+    # Try native st.user.is_logged_in (Streamlit >= 1.42)
+    try:
+        return bool(st.user.is_logged_in)
+    except AttributeError:
+        pass
+
+    # Fallback: check if email exists in st.experimental_user
+    try:
+        return bool(st.experimental_user.get("email"))
+    except Exception:
+        pass
+
+    # Fallback: session_state flag set after manual login
+    return st.session_state.get("is_logged_in", False)
+
+
+def _get_user_info() -> dict:
+    """Get user info dict from whichever API is available."""
+    try:
+        u = st.user
+        return {
+            "email":       getattr(u, "email", ""),
+            "given_name":  getattr(u, "given_name", "") or getattr(u, "name", "").split()[0] if getattr(u, "name", "") else "",
+            "family_name": getattr(u, "family_name", "") or " ".join(getattr(u, "name", "").split()[1:]),
+            "picture":     getattr(u, "picture", ""),
+        }
+    except Exception:
+        try:
+            u = st.experimental_user
+            name = u.get("name", "")
+            parts = name.split() if name else []
+            return {
+                "email":       u.get("email", ""),
+                "given_name":  parts[0] if parts else "",
+                "family_name": " ".join(parts[1:]) if len(parts) > 1 else "",
+                "picture":     u.get("picture", ""),
+            }
+        except Exception:
+            return {}
 
 
 def _render_login_card():
@@ -39,16 +86,14 @@ def _render_login_card():
 
 
 def init_session() -> dict:
-    """Populate session state from st.user after successful login."""
-    user_info = st.user
-    email      = user_info.get("email", "")
-    first_name = user_info.get("given_name", "") or user_info.get("name", "").split()[0]
-    last_name  = user_info.get("family_name", "") or (
-        " ".join(user_info.get("name", "").split()[1:]) if user_info.get("name") else ""
+    """Populate session state from Google user info after login."""
+    info = _get_user_info()
+    user  = upsert_user(
+        info.get("email", ""),
+        info.get("given_name", ""),
+        info.get("family_name", ""),
+        info.get("picture", ""),
     )
-    picture = user_info.get("picture", "")
-
-    user  = upsert_user(email, first_name, last_name, picture)
     roles = get_user_roles(user["id"])
 
     st.session_state["user"]       = user
@@ -72,19 +117,25 @@ def current_user_is_admin() -> bool:
 
 def require_auth() -> bool:
     """
-    Auth gate using Streamlit native st.login().
+    Auth gate — call once at the top of app.py.
     Returns True when signed in, False when showing login UI.
     """
-    if not st.user.is_logged_in:
+    if not _is_logged_in():
         _render_login_card()
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("Sign in with Google", type="primary", use_container_width=True):
+            try:
+                # Streamlit native login button (>= 1.42)
                 st.login()
+            except AttributeError:
+                st.error(
+                    "This Streamlit version does not support native login. "
+                    "Please upgrade to Streamlit >= 1.42.0"
+                )
         st.markdown(
             "<p style='text-align:center;font-size:11px;color:#94a3b8;margin-top:16px'>"
             "Your data is private and not shared with other users.</p>",
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
         return False
 
@@ -129,6 +180,9 @@ def render_user_pill():
 
 def render_logout():
     if st.button("Sign Out", use_container_width=True, type="secondary"):
-        for k in ["user", "user_roles", "is_admin"]:
+        for k in ["user", "user_roles", "is_admin", "is_logged_in"]:
             st.session_state.pop(k, None)
-        st.logout()
+        try:
+            st.logout()
+        except AttributeError:
+            st.rerun()
