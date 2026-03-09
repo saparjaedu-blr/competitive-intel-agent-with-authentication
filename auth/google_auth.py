@@ -585,28 +585,23 @@ def current_user_is_admin() -> bool:
 def require_auth() -> bool:
     """
     Auth gate — call once at the top of app.py.
-    Shows landing page first. Only redirects to Google when button is clicked.
+    Shows full landing page first. Redirects to Google only on button click.
     Returns True when signed in, False when showing landing page.
     """
     if not _is_logged_in():
-
-        # If user clicked "Sign in", trigger redirect now
-        if st.session_state.get("trigger_login"):
-            try:
-                st.login("google")
-            except TypeError:
-                st.login()
-            return False
-
-        # Otherwise show landing page
+        # Render full landing page
         _render_homepage()
 
-        # Sign in button in CTA section
+        # Sign in button — st.login assigned as on_click callback
+        # This ensures the page renders fully before any redirect happens
         col1, col2, col3 = st.columns([2, 1, 2])
         with col2:
-            if st.button("🔑  Sign in with Google", type="primary", use_container_width=True):
-                st.session_state["trigger_login"] = True
-                st.rerun()
+            st.button(
+                "🔑  Sign in with Google",
+                on_click=st.login,
+                type="primary",
+                use_container_width=True,
+            )
 
         st.markdown(
             "<p style='text-align:center;font-size:11px;color:#475569;"
@@ -622,8 +617,7 @@ def require_auth() -> bool:
         """, unsafe_allow_html=True)
         return False
 
-    # Signed in — clear trigger flag and populate session
-    st.session_state.pop("trigger_login", None)
+    # Signed in — populate session once per session
     if "user" not in st.session_state:
         init_session()
     return True
